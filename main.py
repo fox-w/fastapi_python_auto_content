@@ -6,6 +6,7 @@ import cloudinary.uploader
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from text_image_generator import create_text_image
+from PIL import ImageFont
 
 app = FastAPI(title="Quote Image Generator API", 
               description="API for generating and uploading quote images to Cloudinary")
@@ -23,6 +24,56 @@ class QuoteRequest(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "Quote Image Generator API is running. Use /generate endpoint to create images."}
+
+@app.get("/debug-fonts")
+async def debug_fonts():
+    """Endpoint to debug available fonts on the server"""
+    font_info = {
+        "system_fonts": [],
+        "pillow_default": str(ImageFont.load_default()),
+        "environment": os.environ.get("RAILWAY_ENVIRONMENT", "unknown")
+    }
+    
+    # Check common font directories
+    font_dirs = [
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        "/Library/Fonts",  # macOS
+        "C:\\Windows\\Fonts",  # Windows
+        os.path.join(os.path.dirname(__file__), "fonts")  # Local fonts directory
+    ]
+    
+    for font_dir in font_dirs:
+        if os.path.exists(font_dir):
+            font_info["system_fonts"].append({
+                "directory": font_dir,
+                "exists": True,
+                "files": []
+            })
+            
+            # Try to list fonts in this directory and subdirectories
+            try:
+                for root, dirs, files in os.walk(font_dir):
+                    for file in files:
+                        if file.lower().endswith(('.ttf', '.otf')):
+                            font_info["system_fonts"][-1]["files"].append(
+                                os.path.join(root, file)
+                            )
+                            # Limit to first 20 fonts to avoid huge response
+                            if len(font_info["system_fonts"][-1]["files"]) >= 20:
+                                font_info["system_fonts"][-1]["files"].append("... and more")
+                                break
+                    if len(font_info["system_fonts"][-1]["files"]) >= 20:
+                        break
+            except Exception as e:
+                font_info["system_fonts"][-1]["error"] = str(e)
+        else:
+            font_info["system_fonts"].append({
+                "directory": font_dir,
+                "exists": False
+            })
+    
+    return font_info
 
 @app.post("/generate")
 async def generate_image(quote: QuoteRequest):
@@ -43,12 +94,35 @@ async def generate_image(quote: QuoteRequest):
         # Create the image with default settings
         logo_path = "visionary.mindset_logo.png"  # Using the logo in the root directory
         
+        # Try to find a reliable font that should be available on most systems
+        font_path = None
+        
+        # Common fonts to try in order of preference
+        common_fonts = [
+            os.path.join(os.path.dirname(__file__), "fonts", "Arial.ttf"),  # Local font if you added it
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Common on Linux
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Common on Linux
+            "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",  # Another Linux path
+            "/Library/Fonts/Arial.ttf",  # macOS
+            "C:\\Windows\\Fonts\\arial.ttf"  # Windows
+        ]
+        
+        for font in common_fonts:
+            if os.path.exists(font):
+                font_path = font
+                print(f"Using font: {font_path}")
+                break
+        
+        if not font_path:
+            print("No specific font found, using default")
+        
         # Generate the image
         create_text_image(
             text=quote.text,
             output_filename=temp_filename,
             logo_path=logo_path,
-            add_logo=True
+            add_logo=True,
+            font_path=font_path
         )
         
         # Upload to Cloudinary
