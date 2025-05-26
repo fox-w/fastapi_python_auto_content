@@ -28,11 +28,28 @@ async def root():
 @app.get("/debug-fonts")
 async def debug_fonts():
     """Endpoint to debug available fonts on the server"""
+    import subprocess
+    import sys
+    
     font_info = {
         "system_fonts": [],
         "pillow_default": str(ImageFont.load_default()),
-        "environment": os.environ.get("RAILWAY_ENVIRONMENT", "unknown")
+        "environment": os.environ.get("RAILWAY_ENVIRONMENT", "unknown"),
+        "system_info": {
+            "platform": sys.platform,
+            "python_version": sys.version
+        }
     }
+    
+    # Try to find fonts using system commands
+    try:
+        # Try fc-list command (common on Linux)
+        result = subprocess.run(['fc-list'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            fonts = result.stdout.split('\n')[:20]  # Limit to first 20
+            font_info["fc_list"] = fonts
+    except Exception as e:
+        font_info["fc_list_error"] = str(e)
     
     # Check common font directories
     font_dirs = [
@@ -40,7 +57,10 @@ async def debug_fonts():
         "/usr/local/share/fonts",
         "/Library/Fonts",  # macOS
         "C:\\Windows\\Fonts",  # Windows
-        os.path.join(os.path.dirname(__file__), "fonts")  # Local fonts directory
+        "/app/fonts",  # Local fonts directory in container
+        "/system/fonts",
+        "/usr/share/fonts/truetype",
+        "/usr/share/fonts/TTF"
     ]
     
     for font_dir in font_dirs:
@@ -72,6 +92,14 @@ async def debug_fonts():
                 "directory": font_dir,
                 "exists": False
             })
+    
+    # Try to get info about the default font
+    try:
+        default_font = ImageFont.load_default()
+        font_info["default_font_path"] = getattr(default_font, 'path', 'No path attribute')
+        font_info["default_font_size"] = getattr(default_font, 'size', 'No size attribute')
+    except Exception as e:
+        font_info["default_font_error"] = str(e)
     
     return font_info
 
