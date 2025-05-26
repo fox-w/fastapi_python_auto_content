@@ -127,6 +127,9 @@ async def generate_image(quote: QuoteRequest):
         
         # Common fonts to try in order of preference
         common_fonts = [
+            os.path.join(os.path.dirname(__file__), "fonts", "AncizarSerif-Regular.ttf"),  # Bundled font (highest priority)
+            os.path.join(os.path.dirname(__file__), "fonts", "AncizarSerif-Bold.ttf"),  # Bundled bold font
+            os.path.join(os.path.dirname(__file__), "fonts", "Roboto-Regular.ttf"),  # Bundled font backup
             os.path.join(os.path.dirname(__file__), "fonts", "Arial.ttf"),  # Local font if you added it
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Common on Linux
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Common on Linux
