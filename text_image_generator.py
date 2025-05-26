@@ -44,6 +44,23 @@ def create_text_image(text, output_filename="output.png", font_path=None, font_s
                 f"{font_name_no_ext} Bold.ttf", f"{font_name_no_ext} Bold.otf"
             ]
             
+            # For fonts ending with "-Regular", also try replacing "Regular" with "Bold"
+            if font_name_no_ext.endswith("-Regular"):
+                base_name = font_name_no_ext.replace("-Regular", "")
+                bold_patterns.extend([
+                    f"{base_name}-Bold.ttf", f"{base_name}Bold.ttf",
+                    f"{base_name}-Bold.otf", f"{base_name}Bold.otf",
+                    f"{base_name} Bold.ttf", f"{base_name} Bold.otf"
+                ])
+            
+            # For fonts ending with "Regular" (no dash), also try replacing "Regular" with "Bold"
+            elif font_name_no_ext.endswith("Regular"):
+                base_name = font_name_no_ext.replace("Regular", "")
+                bold_patterns.extend([
+                    f"{base_name}Bold.ttf", f"{base_name}Bold.otf",
+                    f"{base_name} Bold.ttf", f"{base_name} Bold.otf"
+                ])
+            
             bold_font_path = None
             for pattern in bold_patterns:
                 possible_path = os.path.join(font_dir, pattern)
@@ -189,7 +206,7 @@ def create_text_image(text, output_filename="output.png", font_path=None, font_s
             logo = Image.open(logo_path)
             
             # Calculate a reasonable size for the logo (e.g., 25% of the width)
-            logo_width = int(width * 0.20)
+            logo_width = int(width * 0.15)  # Reduced from 0.20 to 0.15 (15% instead of 20%)
             logo_height = int(logo_width * logo.height / logo.width)
             
             # Resize the logo
