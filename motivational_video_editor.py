@@ -395,9 +395,30 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                         except:
                             print(f"    Keeping video without audio")
                     else:
-                        # Third attempt: force reload with audio disabled and different target resolution
-                        print(f"    Trying with reduced target resolution...")
-                        clip = VideoFileClip(video_path, audio=False, target_resolution=(480, None))
+                        # Third attempt: try with different FFMPEG options
+                        print(f"    Trying with alternative FFMPEG settings...")
+                        
+                        # Try to force codec settings
+                        import os
+                        old_env = os.environ.get('FFMPEG_LOG_LEVEL', None)
+                        os.environ['FFMPEG_LOG_LEVEL'] = 'quiet'  # Reduce FFMPEG verbosity
+                        
+                        try:
+                            # Try with minimal options
+                            clip = VideoFileClip(video_path, audio=False, fps_source='fps')
+                        except:
+                            try:
+                                # Last resort: try without fps source specification
+                                clip = VideoFileClip(video_path, audio=False)
+                            except:
+                                # Ultimate fallback: manual frame reading
+                                raise Exception("All loading methods failed")
+                        finally:
+                            # Restore environment
+                            if old_env is not None:
+                                os.environ['FFMPEG_LOG_LEVEL'] = old_env
+                            elif 'FFMPEG_LOG_LEVEL' in os.environ:
+                                del os.environ['FFMPEG_LOG_LEVEL']
                     
                     # Verify the clip is valid by checking basic properties
                     if clip.duration <= 0:

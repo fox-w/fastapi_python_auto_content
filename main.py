@@ -137,10 +137,26 @@ async def debug_ffmpeg():
         # Check MoviePy's FFMPEG config
         from moviepy.config import FFMPEG_BINARY
         ffmpeg_info["moviepy_info"]["ffmpeg_binary"] = FFMPEG_BINARY
+        
+        # Test MoviePy's bundled FFMPEG directly
+        if FFMPEG_BINARY and os.path.exists(FFMPEG_BINARY):
+            ffmpeg_info["moviepy_info"]["bundled_ffmpeg_exists"] = True
+            try:
+                result = subprocess.run([FFMPEG_BINARY, '-version'], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    lines = result.stdout.split('\n')
+                    ffmpeg_info["moviepy_info"]["bundled_ffmpeg_version"] = lines[:3]
+                else:
+                    ffmpeg_info["moviepy_info"]["bundled_ffmpeg_error"] = result.stderr
+            except Exception as e:
+                ffmpeg_info["moviepy_info"]["bundled_ffmpeg_test_error"] = str(e)
+        else:
+            ffmpeg_info["moviepy_info"]["bundled_ffmpeg_exists"] = False
+            
     except Exception as e:
         ffmpeg_info["moviepy_info"]["error"] = str(e)
     
-    # Check FFMPEG version
+    # Check FFMPEG version (system)
     try:
         result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
@@ -155,16 +171,18 @@ async def debug_ffmpeg():
     except Exception as e:
         ffmpeg_info["ffmpeg_info"]["error"] = str(e)
     
-    # Check available codecs
+    # Check available codecs using bundled FFMPEG
     try:
-        result = subprocess.run(['ffmpeg', '-codecs'], capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            # Look for h264 codec specifically
-            codec_lines = result.stdout.split('\n')
-            h264_lines = [line for line in codec_lines if 'h264' in line.lower()]
-            ffmpeg_info["ffmpeg_info"]["h264_codecs"] = h264_lines[:5]
-        else:
-            ffmpeg_info["ffmpeg_info"]["codecs_error"] = result.stderr
+        from moviepy.config import FFMPEG_BINARY
+        if FFMPEG_BINARY:
+            result = subprocess.run([FFMPEG_BINARY, '-codecs'], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                # Look for h264 codec specifically
+                codec_lines = result.stdout.split('\n')
+                h264_lines = [line for line in codec_lines if 'h264' in line.lower()]
+                ffmpeg_info["ffmpeg_info"]["h264_codecs"] = h264_lines[:5]
+            else:
+                ffmpeg_info["ffmpeg_info"]["codecs_error"] = result.stderr
     except Exception as e:
         ffmpeg_info["ffmpeg_info"]["codecs_error"] = str(e)
     
@@ -174,8 +192,41 @@ async def debug_ffmpeg():
         import tempfile
         import os
         
-        # Create a minimal test video file path (we won't actually create it)
         ffmpeg_info["moviepy_info"]["import_success"] = True
+        
+        # Test with a simple video URL (if we can find one)
+        test_url = "https://res.cloudinary.com/das3qd7oa/video/upload/v1749125992/willink_do_you_actually_want_to_do_it_longer_uuyxk7.mp4"
+        ffmpeg_info["video_test"] = {
+            "test_url": test_url,
+            "status": "attempting_download"
+        }
+        
+        try:
+            # Try to download and test one video
+            from motivational_video_editor import download_media_from_url
+            
+            print("Testing video download and loading...")
+            temp_path = download_media_from_url(test_url, 'mp4')
+            ffmpeg_info["video_test"]["download_success"] = True
+            ffmpeg_info["video_test"]["file_size"] = os.path.getsize(temp_path)
+            
+            # Try to load with MoviePy
+            clip = VideoFileClip(temp_path, audio=False)
+            ffmpeg_info["video_test"]["moviepy_load_success"] = True
+            ffmpeg_info["video_test"]["duration"] = clip.duration
+            ffmpeg_info["video_test"]["size"] = clip.size
+            
+            # Try to read first frame
+            first_frame = clip.get_frame(0)
+            ffmpeg_info["video_test"]["first_frame_success"] = True
+            ffmpeg_info["video_test"]["frame_shape"] = first_frame.shape
+            
+            clip.close()
+            os.unlink(temp_path)
+            
+        except Exception as video_error:
+            ffmpeg_info["video_test"]["error"] = str(video_error)
+            
     except Exception as e:
         ffmpeg_info["moviepy_info"]["import_error"] = str(e)
     
