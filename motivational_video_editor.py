@@ -3,6 +3,7 @@ import tempfile
 import requests
 from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips, CompositeAudioClip
 import numpy as np
+import time
 
 def analyze_video_format(clip):
     """
@@ -186,8 +187,24 @@ def download_media_from_url(url, file_extension=None):
     """
     try:
         print(f"Downloading from URL: {url}")
-        response = requests.get(url, stream=True, timeout=30)
+        
+        # Add proper headers to avoid blocking
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'video/mp4,video/*,*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'identity',  # Disable compression to ensure complete download
+            'Connection': 'keep-alive'
+        }
+        
+        response = requests.get(url, stream=True, timeout=60, headers=headers)
         response.raise_for_status()
+        
+        # Get content length for verification
+        content_length = response.headers.get('content-length')
+        if content_length:
+            content_length = int(content_length)
+            print(f"Expected file size: {content_length / (1024*1024):.2f} MB")
         
         # Determine file extension
         if not file_extension:
@@ -211,12 +228,44 @@ def download_media_from_url(url, file_extension=None):
         with tempfile.NamedTemporaryFile(suffix=f".{file_extension}", delete=False) as temp_file:
             temp_path = temp_file.name
             
-            # Download in chunks
-            for chunk in response.iter_content(chunk_size=8192):
+            # Download in chunks with progress tracking
+            downloaded_size = 0
+            chunk_size = 8192
+            
+            for chunk in response.iter_content(chunk_size=chunk_size):
                 if chunk:
                     temp_file.write(chunk)
+                    downloaded_size += len(chunk)
+            
+            # Ensure all data is written to disk
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
         
-        print(f"Downloaded to: {temp_path}")
+        # Verify download completion
+        actual_size = os.path.getsize(temp_path)
+        print(f"Downloaded {actual_size / (1024*1024):.2f} MB to: {temp_path}")
+        
+        if content_length and actual_size != content_length:
+            print(f"Warning: Size mismatch. Expected: {content_length}, Got: {actual_size}")
+        
+        # Verify file is not empty and has minimum size
+        if actual_size < 1024:  # Less than 1KB is suspicious for a video
+            raise Exception(f"Downloaded file is too small ({actual_size} bytes). Possible incomplete download.")
+        
+        # Try to verify file integrity by attempting to read its header
+        try:
+            with open(temp_path, 'rb') as f:
+                header = f.read(16)
+                # Check for common video file signatures
+                if file_extension == 'mp4':
+                    # MP4 files should have ftyp box early in the file
+                    f.seek(0)
+                    first_64_bytes = f.read(64)
+                    if b'ftyp' not in first_64_bytes and b'moov' not in first_64_bytes:
+                        print("Warning: File may not be a valid MP4")
+        except Exception as verify_error:
+            print(f"Warning: Could not verify file integrity: {verify_error}")
+        
         return temp_path
         
     except Exception as e:
@@ -271,13 +320,42 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
         
         for i, video_path in enumerate(downloaded_videos):
             print(f"Loading video clip {i+1}/{len(downloaded_videos)}...")
-            clip = VideoFileClip(video_path)
-            clips.append(clip)
             
-            # Analyze format
-            info = analyze_video_format(clip)
-            clips_info.append(info)
-            print(f"  Format: {info['description']} ({info['width']}x{info['height']})")
+            # Small delay to ensure file is fully written
+            time.sleep(0.5)
+            
+            # Verify file still exists and is accessible
+            if not os.path.exists(video_path):
+                raise Exception(f"Downloaded video file not found: {video_path}")
+            
+            file_size = os.path.getsize(video_path)
+            if file_size == 0:
+                raise Exception(f"Downloaded video file is empty: {video_path}")
+            
+            print(f"  Loading file: {os.path.basename(video_path)} ({file_size / (1024*1024):.2f} MB)")
+            
+            try:
+                clip = VideoFileClip(video_path)
+                
+                # Verify the clip is valid by checking basic properties
+                if clip.duration <= 0:
+                    clip.close()
+                    raise Exception(f"Video clip has invalid duration: {clip.duration}")
+                
+                print(f"  Successfully loaded: {clip.duration:.2f}s duration")
+                clips.append(clip)
+                
+                # Analyze format
+                info = analyze_video_format(clip)
+                clips_info.append(info)
+                print(f"  Format: {info['description']} ({info['width']}x{info['height']})")
+                
+            except Exception as clip_error:
+                print(f"  Error loading video clip: {clip_error}")
+                # Clean up any existing clips before re-raising
+                for existing_clip in clips:
+                    existing_clip.close()
+                raise Exception(f"Failed to load video clip {i+1}: {str(clip_error)}")
         
         # Determine target format
         target_format = standardize_video_format(clips_info, format_mode)
