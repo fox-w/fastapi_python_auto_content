@@ -396,7 +396,7 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                             print(f"    Keeping video without audio")
                     else:
                         # Third attempt: force reload with verbose output
-                        clip = VideoFileClip(video_path, verbose=False, audio=False)
+                        clip = VideoFileClip(video_path, audio=False)
                     
                     # Verify the clip is valid by checking basic properties
                     if clip.duration <= 0:
