@@ -114,6 +114,73 @@ async def debug_fonts():
     
     return font_info
 
+@app.get("/debug-ffmpeg")
+async def debug_ffmpeg():
+    """Endpoint to debug FFMPEG version and codec support on the server"""
+    import subprocess
+    import sys
+    
+    ffmpeg_info = {
+        "system_info": {
+            "platform": sys.platform,
+            "python_version": sys.version
+        },
+        "moviepy_info": {},
+        "ffmpeg_info": {}
+    }
+    
+    # Check MoviePy version and config
+    try:
+        import moviepy
+        ffmpeg_info["moviepy_info"]["version"] = moviepy.__version__
+        
+        # Check MoviePy's FFMPEG config
+        from moviepy.config import FFMPEG_BINARY
+        ffmpeg_info["moviepy_info"]["ffmpeg_binary"] = FFMPEG_BINARY
+    except Exception as e:
+        ffmpeg_info["moviepy_info"]["error"] = str(e)
+    
+    # Check FFMPEG version
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            lines = result.stdout.split('\n')
+            ffmpeg_info["ffmpeg_info"]["version_output"] = lines[:5]  # First 5 lines
+        else:
+            ffmpeg_info["ffmpeg_info"]["error"] = f"ffmpeg command failed: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        ffmpeg_info["ffmpeg_info"]["error"] = "ffmpeg command timed out"
+    except FileNotFoundError:
+        ffmpeg_info["ffmpeg_info"]["error"] = "ffmpeg binary not found"
+    except Exception as e:
+        ffmpeg_info["ffmpeg_info"]["error"] = str(e)
+    
+    # Check available codecs
+    try:
+        result = subprocess.run(['ffmpeg', '-codecs'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            # Look for h264 codec specifically
+            codec_lines = result.stdout.split('\n')
+            h264_lines = [line for line in codec_lines if 'h264' in line.lower()]
+            ffmpeg_info["ffmpeg_info"]["h264_codecs"] = h264_lines[:5]
+        else:
+            ffmpeg_info["ffmpeg_info"]["codecs_error"] = result.stderr
+    except Exception as e:
+        ffmpeg_info["ffmpeg_info"]["codecs_error"] = str(e)
+    
+    # Test basic MoviePy functionality
+    try:
+        from moviepy import VideoFileClip
+        import tempfile
+        import os
+        
+        # Create a minimal test video file path (we won't actually create it)
+        ffmpeg_info["moviepy_info"]["import_success"] = True
+    except Exception as e:
+        ffmpeg_info["moviepy_info"]["import_error"] = str(e)
+    
+    return ffmpeg_info
+
 @app.post("/generate")
 async def generate_image(quote: QuoteRequest):
     """

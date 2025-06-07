@@ -395,24 +395,34 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                         except:
                             print(f"    Keeping video without audio")
                     else:
-                        # Third attempt: force reload with verbose output
-                        clip = VideoFileClip(video_path, audio=False)
+                        # Third attempt: force reload with audio disabled and different target resolution
+                        print(f"    Trying with reduced target resolution...")
+                        clip = VideoFileClip(video_path, audio=False, target_resolution=(480, None))
                     
                     # Verify the clip is valid by checking basic properties
                     if clip.duration <= 0:
                         clip.close()
                         raise Exception(f"Video clip has invalid duration: {clip.duration}")
                     
-                    # Test reading the first frame
+                    # Test reading the first frame with fallback methods
                     try:
                         first_frame = clip.get_frame(0)
                         print(f"  Successfully read first frame: {first_frame.shape}")
                     except Exception as frame_error:
                         print(f"  Warning: Could not read first frame: {frame_error}")
-                        if attempt == max_retries - 1:
-                            raise frame_error
-                        clip.close()
-                        continue
+                        
+                        # Try reading frame at a different time
+                        try:
+                            if clip.duration > 1:
+                                test_frame = clip.get_frame(0.5)  # Try at 0.5 seconds
+                                print(f"  Successfully read frame at 0.5s: {test_frame.shape}")
+                            else:
+                                raise frame_error
+                        except:
+                            if attempt == max_retries - 1:
+                                raise frame_error
+                            clip.close()
+                            continue
                     
                     print(f"  Successfully loaded: {clip.duration:.2f}s duration")
                     break
