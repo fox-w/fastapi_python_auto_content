@@ -204,36 +204,72 @@ async def generate_seamless_videos(request: VideoRequest):
         Cloudinary URL of the uploaded video and processing details
     """
     try:
+        # Log the incoming request for debugging
+        print("=== INCOMING REQUEST ===")
+        print(f"Video URLs count: {len(request.video_urls)}")
+        for i, url in enumerate(request.video_urls):
+            print(f"  Video {i+1}: {url[:100]}{'...' if len(url) > 100 else ''}")
+        print(f"Audio URL: {request.audio_url}")
+        print(f"Format mode: {request.format_mode}")
+        print(f"Moody effect: {request.apply_moody_effect}")
+        print(f"Moody intensity: {request.moody_intensity}")
+        print(f"Video audio volume: {request.video_audio_volume}")
+        print(f"Background music volume: {request.background_music_volume}")
+        print("========================")
+        
         # Validate input
         if not request.video_urls or len(request.video_urls) < 1:
-            raise HTTPException(status_code=400, detail="At least one video URL is required")
+            error_msg = "At least one video URL is required"
+            print(f"❌ Validation Error: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
         if len(request.video_urls) > 10:  # Reasonable limit
-            raise HTTPException(status_code=400, detail="Maximum 10 videos allowed per compilation")
+            error_msg = "Maximum 10 videos allowed per compilation"
+            print(f"❌ Validation Error: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Check for malformed URLs (common issue with make.com)
+        for i, url in enumerate(request.video_urls):
+            if ',' in url and url.count('http') > 1:
+                error_msg = f"Video URL {i+1} appears to contain multiple URLs separated by commas. Please provide each URL as a separate array element."
+                print(f"❌ URL Format Error: {error_msg}")
+                print(f"   Problematic URL: {url}")
+                raise HTTPException(status_code=400, detail=error_msg)
         
         # Validate format mode
         valid_formats = ["vertical", "horizontal", "auto"]
         if request.format_mode not in valid_formats:
-            raise HTTPException(status_code=400, detail=f"format_mode must be one of: {valid_formats}")
+            error_msg = f"format_mode must be one of: {valid_formats}"
+            print(f"❌ Validation Error: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
         # Validate volume levels
         if not (0.0 <= request.video_audio_volume <= 1.0):
-            raise HTTPException(status_code=400, detail="video_audio_volume must be between 0.0 and 1.0")
+            error_msg = "video_audio_volume must be between 0.0 and 1.0"
+            print(f"❌ Validation Error: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
         if not (0.0 <= request.background_music_volume <= 1.0):
-            raise HTTPException(status_code=400, detail="background_music_volume must be between 0.0 and 1.0")
+            error_msg = "background_music_volume must be between 0.0 and 1.0"
+            print(f"❌ Validation Error: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
         if not (0.0 <= request.moody_intensity <= 1.0):
-            raise HTTPException(status_code=400, detail="moody_intensity must be between 0.0 and 1.0")
+            error_msg = "moody_intensity must be between 0.0 and 1.0"
+            print(f"❌ Validation Error: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
-        print(f"Processing video compilation request with {len(request.video_urls)} videos")
+        print(f"✅ Validation passed. Processing video compilation request with {len(request.video_urls)} videos")
         
         # Create temporary file for output
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
             temp_output_path = temp_file.name
         
         try:
+            print(f"📁 Created temporary output file: {temp_output_path}")
+            
             # Create the seamless video compilation
+            print("🎬 Starting video compilation...")
             video_path = create_seamless_video_compilation(
                 video_urls=request.video_urls,
                 audio_url=request.audio_url,
@@ -245,7 +281,7 @@ async def generate_seamless_videos(request: VideoRequest):
                 background_music_volume=request.background_music_volume
             )
             
-            print("Uploading video to Cloudinary...")
+            print("☁️ Uploading video to Cloudinary...")
             
             # Upload to Cloudinary
             result = cloudinary.uploader.upload(
@@ -259,7 +295,7 @@ async def generate_seamless_videos(request: VideoRequest):
                 ]
             )
             
-            print(f"Video uploaded successfully: {result['secure_url']}")
+            print(f"✅ Video uploaded successfully: {result['secure_url']}")
             
             # Return the result - simplified response
             return {
@@ -270,10 +306,15 @@ async def generate_seamless_videos(request: VideoRequest):
         finally:
             # Clean up temporary file
             if os.path.exists(temp_output_path):
+                print(f"🧹 Cleaning up temporary file: {temp_output_path}")
                 os.unlink(temp_output_path)
                 
     except HTTPException:
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        print(f"Error in video generation: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Video generation failed: {str(e)}")
+        error_msg = f"Video generation failed: {str(e)}"
+        print(f"💥 FATAL ERROR: {error_msg}")
+        print("🔍 Full error details:")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=error_msg)

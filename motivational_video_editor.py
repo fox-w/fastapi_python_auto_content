@@ -241,12 +241,21 @@ def download_media_from_url(url, file_extension=None):
             temp_file.flush()
             os.fsync(temp_file.fileno())
         
+        # Additional sync - wait for OS to finish writing
+        time.sleep(0.2)
+        
         # Verify download completion
         actual_size = os.path.getsize(temp_path)
         print(f"Downloaded {actual_size / (1024*1024):.2f} MB to: {temp_path}")
         
         if content_length and actual_size != content_length:
             print(f"Warning: Size mismatch. Expected: {content_length}, Got: {actual_size}")
+            # If there's a size mismatch, wait a bit more and check again
+            time.sleep(1.0)
+            final_size = os.path.getsize(temp_path)
+            if final_size != actual_size:
+                print(f"File size changed after wait: {actual_size} -> {final_size}")
+                actual_size = final_size
         
         # Verify file is not empty and has minimum size
         if actual_size < 1024:  # Less than 1KB is suspicious for a video
@@ -263,8 +272,22 @@ def download_media_from_url(url, file_extension=None):
                     first_64_bytes = f.read(64)
                     if b'ftyp' not in first_64_bytes and b'moov' not in first_64_bytes:
                         print("Warning: File may not be a valid MP4")
+                        
+                        # Try reading more of the file to check for MP4 headers
+                        f.seek(0)
+                        first_1kb = f.read(1024)
+                        if b'ftyp' not in first_1kb and b'moov' not in first_1kb and b'mdat' not in first_1kb:
+                            raise Exception("Downloaded file does not appear to be a valid MP4")
         except Exception as verify_error:
             print(f"Warning: Could not verify file integrity: {verify_error}")
+        
+        # Final file access test
+        try:
+            with open(temp_path, 'rb') as test_file:
+                test_file.read(1024)  # Try to read first 1KB
+            print(f"File access test passed for: {temp_path}")
+        except Exception as access_error:
+            raise Exception(f"Downloaded file is not accessible: {str(access_error)}")
         
         return temp_path
         
@@ -321,8 +344,8 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
         for i, video_path in enumerate(downloaded_videos):
             print(f"Loading video clip {i+1}/{len(downloaded_videos)}...")
             
-            # Small delay to ensure file is fully written
-            time.sleep(0.5)
+            # Longer delay to ensure file is fully written
+            time.sleep(1.0)  # Increased from 0.5 to 1.0 second
             
             # Verify file still exists and is accessible
             if not os.path.exists(video_path):
@@ -334,28 +357,89 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
             
             print(f"  Loading file: {os.path.basename(video_path)} ({file_size / (1024*1024):.2f} MB)")
             
-            try:
-                clip = VideoFileClip(video_path)
-                
-                # Verify the clip is valid by checking basic properties
-                if clip.duration <= 0:
-                    clip.close()
-                    raise Exception(f"Video clip has invalid duration: {clip.duration}")
-                
-                print(f"  Successfully loaded: {clip.duration:.2f}s duration")
-                clips.append(clip)
-                
-                # Analyze format
-                info = analyze_video_format(clip)
-                clips_info.append(info)
-                print(f"  Format: {info['description']} ({info['width']}x{info['height']})")
-                
-            except Exception as clip_error:
-                print(f"  Error loading video clip: {clip_error}")
-                # Clean up any existing clips before re-raising
-                for existing_clip in clips:
-                    existing_clip.close()
-                raise Exception(f"Failed to load video clip {i+1}: {str(clip_error)}")
+            # Add additional file stability check
+            initial_size = file_size
+            time.sleep(0.5)  # Wait a bit more
+            final_size = os.path.getsize(video_path)
+            
+            if initial_size != final_size:
+                print(f"  Warning: File size changed during wait ({initial_size} -> {final_size})")
+                time.sleep(1.0)  # Wait even longer
+                final_size = os.path.getsize(video_path)
+            
+            print(f"  File appears stable at {final_size / (1024*1024):.2f} MB")
+            
+            # Try multiple times to load the video with different approaches
+            clip = None
+            max_retries = 3
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f"  Attempt {attempt + 1}/{max_retries} to load video...")
+                    
+                    # Try loading with different threading settings
+                    if attempt == 0:
+                        # First attempt: normal loading
+                        clip = VideoFileClip(video_path)
+                    elif attempt == 1:
+                        # Second attempt: with audio disabled first
+                        clip = VideoFileClip(video_path, audio=False)
+                        print(f"    Loaded without audio, duration: {clip.duration:.2f}s")
+                        # Now try to add audio back
+                        try:
+                            clip_with_audio = VideoFileClip(video_path)
+                            if clip_with_audio.audio is not None:
+                                clip.close()
+                                clip = clip_with_audio
+                                print(f"    Successfully added audio back")
+                        except:
+                            print(f"    Keeping video without audio")
+                    else:
+                        # Third attempt: force reload with verbose output
+                        clip = VideoFileClip(video_path, verbose=False, audio=False)
+                    
+                    # Verify the clip is valid by checking basic properties
+                    if clip.duration <= 0:
+                        clip.close()
+                        raise Exception(f"Video clip has invalid duration: {clip.duration}")
+                    
+                    # Test reading the first frame
+                    try:
+                        first_frame = clip.get_frame(0)
+                        print(f"  Successfully read first frame: {first_frame.shape}")
+                    except Exception as frame_error:
+                        print(f"  Warning: Could not read first frame: {frame_error}")
+                        if attempt == max_retries - 1:
+                            raise frame_error
+                        clip.close()
+                        continue
+                    
+                    print(f"  Successfully loaded: {clip.duration:.2f}s duration")
+                    break
+                    
+                except Exception as clip_error:
+                    print(f"  Attempt {attempt + 1} failed: {clip_error}")
+                    if clip:
+                        clip.close()
+                        clip = None
+                    
+                    if attempt == max_retries - 1:
+                        # Final attempt failed
+                        print(f"  All attempts failed for video clip {i+1}")
+                        # Clean up any existing clips before re-raising
+                        for existing_clip in clips:
+                            existing_clip.close()
+                        raise Exception(f"Failed to load video clip {i+1} after {max_retries} attempts: {str(clip_error)}")
+                    
+                    # Wait before retry
+                    time.sleep(1.0)
+            
+            clips.append(clip)
+            
+            # Analyze format
+            info = analyze_video_format(clip)
+            clips_info.append(info)
+            print(f"  Format: {info['description']} ({info['width']}x{info['height']})")
         
         # Determine target format
         target_format = standardize_video_format(clips_info, format_mode)
