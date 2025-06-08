@@ -119,6 +119,7 @@ async def debug_ffmpeg():
     """Endpoint to debug FFMPEG version and codec support on the server"""
     import subprocess
     import sys
+    import os
     
     ffmpeg_info = {
         "system_info": {
@@ -226,6 +227,39 @@ async def debug_ffmpeg():
             
         except Exception as video_error:
             ffmpeg_info["video_test"]["error"] = str(video_error)
+            
+            # If first frame failed, try alternative approaches
+            try:
+                # Try loading without frame validation
+                clip = VideoFileClip(temp_path, audio=False)
+                ffmpeg_info["video_test"]["clip_load_without_frame_test"] = True
+                ffmpeg_info["video_test"]["duration_alt"] = clip.duration
+                ffmpeg_info["video_test"]["size_alt"] = clip.size
+                
+                # Try reading frame at middle of video
+                if clip.duration > 1:
+                    mid_frame = clip.get_frame(clip.duration / 2)
+                    ffmpeg_info["video_test"]["mid_frame_success"] = True
+                    ffmpeg_info["video_test"]["mid_frame_shape"] = mid_frame.shape
+                
+                # Try a basic resize operation to see if processing works
+                resized_clip = clip.resized((640, 360))
+                ffmpeg_info["video_test"]["resize_test_success"] = True
+                ffmpeg_info["video_test"]["resized_size"] = resized_clip.size
+                
+                clip.close()
+                resized_clip.close()
+                os.unlink(temp_path)
+                
+                ffmpeg_info["video_test"]["bypass_first_frame_success"] = True
+                
+            except Exception as alt_error:
+                ffmpeg_info["video_test"]["alternative_error"] = str(alt_error)
+                try:
+                    if 'temp_path' in locals() and os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except:
+                    pass
             
     except Exception as e:
         ffmpeg_info["moviepy_info"]["import_error"] = str(e)

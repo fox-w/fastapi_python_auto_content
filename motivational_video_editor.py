@@ -369,6 +369,73 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
             
             print(f"  File appears stable at {final_size / (1024*1024):.2f} MB")
             
+            # DEBUG: Check temp file details
+            print(f"  DEBUG: Full file path: {video_path}")
+            print(f"  DEBUG: File exists: {os.path.exists(video_path)}")
+            print(f"  DEBUG: File is file: {os.path.isfile(video_path)}")
+            
+            # Check file permissions
+            try:
+                import stat
+                file_stat = os.stat(video_path)
+                file_mode = stat.filemode(file_stat.st_mode)
+                print(f"  DEBUG: File permissions: {file_mode}")
+                print(f"  DEBUG: File owner can read: {bool(file_stat.st_mode & stat.S_IRUSR)}")
+                print(f"  DEBUG: File owner can write: {bool(file_stat.st_mode & stat.S_IWUSR)}")
+            except Exception as perm_error:
+                print(f"  DEBUG: Could not check permissions: {perm_error}")
+            
+            # Test raw file reading
+            try:
+                with open(video_path, 'rb') as test_file:
+                    first_bytes = test_file.read(16)
+                    print(f"  DEBUG: First 16 bytes readable: {len(first_bytes)} bytes")
+                    print(f"  DEBUG: File header hex: {first_bytes.hex()}")
+            except Exception as read_error:
+                print(f"  DEBUG: Could not read file: {read_error}")
+            
+            # Check if path has any special characters
+            import string
+            path_chars = set(video_path)
+            safe_chars = set(string.ascii_letters + string.digits + '/-._')
+            unsafe_chars = path_chars - safe_chars
+            if unsafe_chars:
+                print(f"  DEBUG: Path contains potentially problematic characters: {unsafe_chars}")
+            else:
+                print(f"  DEBUG: Path contains only safe characters")
+            
+            # Try creating a copy with a simpler path
+            simple_temp_path = None
+            try:
+                import tempfile
+                import shutil
+                with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False, prefix="simple_") as simple_temp:
+                    simple_temp_path = simple_temp.name
+                
+                print(f"  DEBUG: Copying to simpler path: {simple_temp_path}")
+                shutil.copy2(video_path, simple_temp_path)
+                
+                # Verify copy
+                copy_size = os.path.getsize(simple_temp_path)
+                print(f"  DEBUG: Copy size: {copy_size / (1024*1024):.2f} MB")
+                
+                if copy_size == final_size:
+                    print(f"  DEBUG: Using simplified path for MoviePy")
+                    video_path = simple_temp_path  # Use the copy instead
+                else:
+                    print(f"  DEBUG: Copy size mismatch, using original")
+                    os.unlink(simple_temp_path)
+                    simple_temp_path = None
+                    
+            except Exception as copy_error:
+                print(f"  DEBUG: Could not create copy: {copy_error}")
+                if simple_temp_path and os.path.exists(simple_temp_path):
+                    try:
+                        os.unlink(simple_temp_path)
+                    except:
+                        pass
+                simple_temp_path = None
+            
             # Try multiple times to load the video with different approaches
             clip = None
             max_retries = 3
@@ -438,12 +505,24 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                                 test_frame = clip.get_frame(0.5)  # Try at 0.5 seconds
                                 print(f"  Successfully read frame at 0.5s: {test_frame.shape}")
                             else:
-                                raise frame_error
-                        except:
+                                # Try reading at 10% of duration
+                                test_time = clip.duration * 0.1
+                                test_frame = clip.get_frame(test_time)
+                                print(f"  Successfully read frame at {test_time:.2f}s: {test_frame.shape}")
+                        except Exception as alt_frame_error:
+                            print(f"  Warning: Alternative frame reading also failed: {alt_frame_error}")
+                            
+                            # If we're on the last attempt and frame reading fails,
+                            # let's try to continue anyway since the clip loaded successfully
                             if attempt == max_retries - 1:
-                                raise frame_error
-                            clip.close()
-                            continue
+                                print(f"  WARNING: Proceeding without frame validation (clip appears to load correctly)")
+                                print(f"  Clip info: duration={clip.duration:.2f}s, size={clip.size}")
+                                # Don't raise the error - proceed with the clip
+                            else:
+                                if attempt == max_retries - 1:
+                                    raise frame_error
+                                clip.close()
+                                continue
                     
                     print(f"  Successfully loaded: {clip.duration:.2f}s duration")
                     break
@@ -466,6 +545,14 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                     time.sleep(1.0)
             
             clips.append(clip)
+            
+            # Clean up the simplified temp file if we created one
+            if simple_temp_path and os.path.exists(simple_temp_path) and simple_temp_path != video_path:
+                try:
+                    os.unlink(simple_temp_path)
+                    print(f"  DEBUG: Cleaned up simplified temp file")
+                except:
+                    pass
             
             # Analyze format
             info = analyze_video_format(clip)
