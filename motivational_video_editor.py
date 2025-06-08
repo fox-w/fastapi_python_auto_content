@@ -511,15 +511,14 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                         except Exception as alt_frame_error:
                             print(f"  Warning: Alternative frame reading also failed: {alt_frame_error}")
                             
-                            # If we're on the last attempt and frame reading fails,
-                            # let's try to continue anyway since the clip loaded successfully
+                            # If we're on the last attempt, proceed anyway since clip loaded successfully
                             if attempt == max_retries - 1:
                                 print(f"  WARNING: Proceeding without frame validation (clip appears to load correctly)")
                                 print(f"  Clip info: duration={clip.duration:.2f}s, size={clip.size}")
-                                # Don't raise the error - proceed with the clip
+                                # Don't raise error - just proceed with this working clip
+                                break
                             else:
-                                if attempt == max_retries - 1:
-                                    raise frame_error
+                                # Not final attempt, continue to next attempt
                                 clip.close()
                                 continue
                     
