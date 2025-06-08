@@ -266,6 +266,93 @@ async def debug_ffmpeg():
     
     return ffmpeg_info
 
+@app.get("/debug-opencv")
+async def debug_opencv():
+    """Test OpenCV as an alternative video processing method"""
+    import sys
+    
+    opencv_info = {
+        "system_info": {
+            "platform": sys.platform,
+            "python_version": sys.version
+        },
+        "opencv_info": {},
+        "video_test": {}
+    }
+    
+    # Test OpenCV import and basic functionality
+    try:
+        import cv2
+        opencv_info["opencv_info"]["version"] = cv2.__version__
+        opencv_info["opencv_info"]["import_success"] = True
+        
+        # Test with one of your videos
+        test_url = "https://res.cloudinary.com/das3qd7oa/video/upload/v1749125992/willink_do_you_actually_want_to_do_it_longer_uuyxk7.mp4"
+        opencv_info["video_test"]["test_url"] = test_url
+        
+        try:
+            from motivational_video_editor import download_media_from_url
+            
+            # Download the video
+            temp_path = download_media_from_url(test_url, 'mp4')
+            opencv_info["video_test"]["download_success"] = True
+            opencv_info["video_test"]["file_size"] = os.path.getsize(temp_path)
+            
+            # Try to open with OpenCV
+            cap = cv2.VideoCapture(temp_path)
+            
+            if cap.isOpened():
+                opencv_info["video_test"]["opencv_open_success"] = True
+                
+                # Get video properties
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                duration = frame_count / fps if fps > 0 else 0
+                
+                opencv_info["video_test"]["properties"] = {
+                    "fps": fps,
+                    "frame_count": frame_count,
+                    "width": width,
+                    "height": height,
+                    "duration": duration
+                }
+                
+                # Try to read the first frame
+                ret, frame = cap.read()
+                if ret:
+                    opencv_info["video_test"]["first_frame_success"] = True
+                    opencv_info["video_test"]["frame_shape"] = frame.shape
+                else:
+                    opencv_info["video_test"]["first_frame_error"] = "Could not read first frame"
+                
+                # Try to read a frame from the middle
+                if frame_count > 30:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
+                    ret, frame = cap.read()
+                    if ret:
+                        opencv_info["video_test"]["mid_frame_success"] = True
+                        opencv_info["video_test"]["mid_frame_shape"] = frame.shape
+                
+                cap.release()
+                
+            else:
+                opencv_info["video_test"]["opencv_open_error"] = "Could not open video with OpenCV"
+            
+            # Clean up
+            os.unlink(temp_path)
+            
+        except Exception as video_error:
+            opencv_info["video_test"]["error"] = str(video_error)
+            
+    except ImportError as e:
+        opencv_info["opencv_info"]["import_error"] = str(e)
+    except Exception as e:
+        opencv_info["opencv_info"]["error"] = str(e)
+    
+    return opencv_info
+
 @app.post("/generate")
 async def generate_image(quote: QuoteRequest):
     """
