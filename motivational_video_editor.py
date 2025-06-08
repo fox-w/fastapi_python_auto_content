@@ -466,7 +466,6 @@ def create_seamless_video_compilation(video_urls, audio_url=None, output_path=No
                         print(f"    Trying with alternative FFMPEG settings...")
                         
                         # Try to force codec settings
-                        import os
                         old_env = os.environ.get('FFMPEG_LOG_LEVEL', None)
                         os.environ['FFMPEG_LOG_LEVEL'] = 'quiet'  # Reduce FFMPEG verbosity
                         
